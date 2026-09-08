@@ -1,6 +1,6 @@
 # MiniCRM — Software Design Specification
 
-Status: draft v0.3 — reviewed against [idea.md](idea.md) and the learning, cost, Docker CI/CD, Databricks setup, and local MCP requirements on 2026-09-07.
+Status: draft v0.4 — v0.3 reviewed again on 2026-09-07: module dependency direction resolved by sharing one Postgres implementation/DDL between local and Lakebase, a local→Lakebase sync tool added (§5.4), and self-hosted-runner PR risk given a concrete GitHub-settings gate (§11.1).
 
 This document specifies work to implement. Commands, workflows, and deliverable paths below are acceptance contracts; they do not imply that the application or infrastructure already exists. `idea.md` remains the source of the curriculum.
 
@@ -88,22 +88,27 @@ Customer360 has the same contract across implementations: missing customer → `
 ```text
 crm-domain       — domain only
 crm-application  — domain + repository ports + application services
-crm-persistence  — in-memory and local Postgres adapters
-crm-databricks   — Lakebase connection/auth integration + SQL Warehouse analytics adapter
+crm-persistence  — in-memory adapters, and the one JDBC/Postgres repository
+                   implementation shared by local Docker Postgres and Lakebase
+crm-databricks   — depends on crm-persistence; adds only what's actually
+                   Databricks-specific: the Lakebase credential-rotating
+                   DataSource, the SQL Warehouse analytics adapter (different
+                   dialect, genuinely separate code), and the local→Lakebase
+                   sync tool (§5.4)
 crm-mcp          — MCP tools calling application services
 crm-api          — Spring Boot REST adapter and runtime composition root
 crm-loadtest     — HTTP/MCP client harness and isolated concurrency/preview labs
 ```
 
-Both persistence modules depend on application ports and the domain. Application code never imports adapters. `crm-api` wires the chosen persistence adapter and MCP transport at startup; its controllers call services only. `crm-loadtest` exercises the running service through HTTP/MCP without importing server internals. Enforce dependency direction with ArchUnit.
+`crm-persistence` depends only on `crm-application`/`crm-domain`. `crm-databricks` depends on `crm-persistence` as well, specifically to reuse its Postgres repository classes for Lakebase rather than reimplementing them — the two stores are believed schema- and dialect-compatible (both real Postgres), so a second implementation would be pure duplication, not a hedge against real differences. Application code never imports adapters. `crm-api` wires the chosen persistence adapter and MCP transport at startup; its controllers call services only. `crm-loadtest` exercises the running service through HTTP/MCP without importing server internals. Enforce dependency direction with ArchUnit.
 
 | Profile | Storage and use | Remote dependency |
 |---|---|---|
 | `in-memory` | Original collections/concurrency lessons; disposable fixtures | None |
-| `local` (default) | Postgres in Docker; all eight endpoints and local MCP | None |
-| `databricks-free` | Lakebase for CRM transactions/Customer360; SQL Warehouse for the copied analytics dataset | Explicitly configured Free Edition workspace |
+| `local` (default) | Postgres in Docker; all eight endpoints and local MCP; primary day-to-day development and test substrate | None |
+| `databricks-free` | Lakebase (same schema and repository code as `local`) for CRM transactions/Customer360; SQL Warehouse for the copied analytics dataset | Explicitly configured Free Edition workspace |
 
-A startup selects one profile. Missing Databricks credentials must not break `local`. Invalid remote configuration fails clearly, without silently switching stores. Switching back to local is an explicit action; local and remote profiles do not automatically synchronize data. Within the remote profile, analytics copying is an explicit operation (§9.3).
+A startup selects one profile. Missing Databricks credentials must not break `local`. Invalid remote configuration fails clearly, without silently switching stores. Switching back to local is an explicit action. Local and Lakebase are two independent live databases, not one replicated store — nothing runs automatically between them. Moving data from local to Lakebase, and from Lakebase to analytics, are both explicit, manually triggered operations (§5.4, §9.3 respectively) with different purposes: §5.4 avoids hand-maintaining two seed datasets for the same schema; §9.3 feeds the eventually-consistent analytics dashboard.
 
 Use Java 25, Maven Wrapper, Spring Boot introduced at Milestone 5, JUnit/AssertJ, and Testcontainers where useful. Pin tested dependency versions and container digests during implementation. Keep preview code in a separately activated lab module/profile, outside the default application artifact. Java 25 structured concurrency is a preview API; compile, test, and run that lab with the same JDK and `--enable-preview`. Do not assume a future finalization date. [Java 25 preview APIs](https://docs.oracle.com/en/java/javase/25/docs/api/preview-list.html).
 
@@ -121,7 +126,7 @@ activities(activity_id, customer_id, type, subject, occurred_at, created_by,
 tags(customer_id, tag)
 ```
 
-Activity persistence must include each subtype's required fields or a versioned payload with tested serialization. Maintain separate Postgres and Databricks DDL; do not assume compatible SQL dialects. Commit tiny, synthetic seed datasets with stable IDs. Avoid production/customer data.
+Activity persistence must include each subtype's required fields or a versioned payload with tested serialization. There is **one** versioned Postgres DDL for this schema, applied unchanged to both local Docker Postgres and Lakebase (§4, §5.4) — a genuinely separate dialect only exists for the Delta/Warehouse analytics schema in §9.3, which must not be assumed compatible with it. Commit a tiny, synthetic seed dataset with stable IDs, maintained once against local Postgres; Lakebase is populated from it via the sync tool (§5.4), not a second hand-maintained seed script. Avoid production/customer data.
 
 ### 5.2 Local correctness baseline
 
@@ -141,7 +146,7 @@ Scope activity idempotency to `(customer_id, idempotency_key)` with a Postgres u
 
 ### 5.3 Lakebase transactions and Warehouse analytics
 
-Use the PostgreSQL JDBC driver for Lakebase and share the SQL/repository implementation with local Postgres where compatible. Keep Lakebase authentication/configuration in `crm-databricks`. Use a bounded HikariCP pool, parameterized statements, query deadlines, and `try-with-resources`. Verify Lakebase's supported credential flow for the selected project type; refresh credentials for new physical connections and test expiration/reconnection. A local Postgres test does not verify that authentication path. [Lakebase connections](https://docs.databricks.com/aws/en/oltp/projects/connect).
+Use the PostgreSQL JDBC driver for Lakebase, reusing `crm-persistence`'s repository implementation as-is (§4) rather than a parallel copy; keep only Lakebase's authentication/`DataSource` configuration in `crm-databricks`. Treat "where compatible" as a thing to confirm at Milestone 4 against the real Lakebase instance, not assume — if a genuine Lakebase-specific SQL difference turns up, isolate it behind the shared interface rather than forking the whole implementation. Use a bounded HikariCP pool, parameterized statements, query deadlines, and `try-with-resources`. Verify Lakebase's supported credential flow for the selected project type; refresh credentials for new physical connections and test expiration/reconnection. A local Postgres test does not verify that authentication path. [Lakebase connections](https://docs.databricks.com/aws/en/oltp/projects/connect).
 
 Apply §5.2's transactional version and idempotency rules to Lakebase. All interactive CRM operations, including Customer360 and MCP reads, use this path. Measure actual latency, including cold starts and connection acquisition; do not promise a fixed millisecond response time.
 
@@ -152,6 +157,14 @@ Delta primary, foreign, and unique keys are informational; `RELY` does not enfor
 The initial dashboard may read Lakebase directly until the analytics adapter is implemented at Milestone 10. Thereafter the remote dashboard returns `dataAsOf` and `source` so stale snapshots are visible. A failed copy preserves the previous successful snapshot without blocking CRM transactions. Local mode continues to compute the dashboard from local Postgres.
 
 A later Statement Execution API adapter replaces only the analytics adapter and exercises submit/poll/cancel with bounded result handling. [Statement Execution API](https://docs.databricks.com/aws/en/dev-tools/sql-execution-tutorial).
+
+### 5.4 Local-to-Lakebase sync (on demand)
+
+Local Postgres is the primary, default development and test substrate — nearly all work happens against it, for free, with no quota to watch. Lakebase is populated **from** local Postgres on demand, only when a Milestone actually needs to exercise the real remote path (setup verification, the bounded smoke suite in §6/§9.2, or a manual demo) — not kept continuously in step with it.
+
+`scripts/sync-local-to-lakebase.sh` reads the current rows from local Postgres and upserts them into Lakebase **using the same `crm-persistence` repository classes both stores already share** (§4) — read via the local `DataSource`, write via the Lakebase `DataSource`, no separate copy of the mapping/SQL logic. This is one-way only (local → Lakebase); the tool never reads Lakebase back into local, so there is never ambiguity about which database is the source of truth for test data. Upserts are keyed on the schema's existing stable IDs (§5.1), so re-running the sync is harmless and does not accumulate duplicates. The row count it moves is bounded by the same tiny-synthetic-seed-dataset ethos as the rest of this spec (§5.1) — this is a dev-data mover, not a bulk migration tool, and it must respect the same Free Edition statement/deadline budget as the smoke suite (§6) since it is, itself, a burst of Lakebase writes.
+
+This also removes a duplication that existed in v0.2: rather than an independent Lakebase seed script (§9.2 previously implied one), Lakebase's schema is created by the same DDL as local Postgres (§5.1) and its data comes from this sync tool — one dataset to maintain, not two.
 
 ## 6. Customer360 concurrency progression
 
@@ -169,7 +182,9 @@ Do not make a ±10% wall-clock benchmark a correctness assertion. Record warm-up
 
 Start with a local pool of 10 and configurable bulkhead limits. Every retry reacquires a permit; release permits/connections on all completion paths. Use bounded queues and deadlines covering acquisition, query, retry, and aggregation. Do not pool virtual threads to limit database capacity.
 
-Run 50/500/5,000/20,000-request experiments only locally as hardware permits. Stop on resource exhaustion; no new hardware is required. For Free Edition, use at most two outstanding statements (writes serialized), at most 20 statements per smoke run, and a five-minute overall deadline. Quota errors terminate the run without retries. Large-scale and retry-storm tests never target Databricks.
+**All load and stress testing — every concurrency version A–E, all 50/500/5,000/20,000-request experiments, and every retry-storm/failure-lab reproduction — targets local Postgres only, unconditionally.** Free Edition is never a load-test target, not even at reduced scale. Stop local runs on resource exhaustion; no new hardware is required.
+
+The only traffic Lakebase/Warehouse ever see is the separate, fixed-size **bounded smoke suite** (§9.2, §6 step 6): a tiny, non-scaling correctness/connectivity check — at most two outstanding statements (writes serialized), at most 20 statements total, five-minute overall deadline — that exists to prove the real remote path works at all, not to measure its performance under load. It never runs at the seed dataset's expense either, since the seed itself stays tiny (§5.1, §5.4). Quota errors terminate the smoke run without retries; nothing about it ever scales up toward the local load-test numbers.
 
 ## 7. Failure laboratory, JMM, and resilience
 
@@ -226,14 +241,14 @@ The design guarantees a local path without paid cloud dependencies; future free-
 
 ### 9.2 Setup deliverables and sequence
 
-Commit `docs/databricks-setup.md`, `infra/databricks/sql/` (versioned DDL and seed scripts), `infra/databricks/config.example.env`, and `scripts/databricks-{preflight,apply,smoke}.sh`.
+Commit `docs/databricks-setup.md`, `infra/databricks/sql/` (the versioned Postgres DDL shared with local, §5.1 — plus the separate Delta/Warehouse analytics DDL for §9.3), `infra/databricks/config.example.env`, `scripts/databricks-{preflight,apply,smoke}.sh`, and `scripts/sync-local-to-lakebase.sh` (§5.4). There is no independent Lakebase seed script — data comes from the sync tool.
 
 1. Create/sign into Free Edition manually. Record the edition and verification date without secrets. Use workspace-managed resources; no Terraform cloud-account setup.
 2. Create the available free Lakebase project and record its project/branch, Postgres endpoint, database, and role. Select the SQL warehouse; record workspace host, warehouse ID, and JDBC HTTP path from its connection details. Use a writable existing catalog and a dedicated `mini_crm_dev` schema. Prefer auto-stop where supported; no keep-alive job.
 3. Establish supported user authentication. Prefer OAuth U2M for local CLI setup; verify Lakebase database credential generation and Warehouse JDBC OAuth configuration separately. A CLI login is not automatically a JDBC credential. Document exactly how the chosen credential reaches the host script/container, expiry, and refresh. Use a scoped PAT only if the workspace supports it. Do not assume account APIs or service-principal creation are available. [Databricks user OAuth](https://docs.databricks.com/aws/en/dev-tools/auth/oauth-u2m).
 4. Preflight checks the explicit `databricks-free` target, recorded Free Edition verification, allowlisted workspace host, valid auth for both stores, Lakebase database access, warehouse access, and intended database/catalog/schema. A URL alone cannot prove edition; fail if verification is missing. Never print credentials.
-5. Apply versioned transactional DDL to the dedicated Lakebase schema and analytics DDL to the dedicated Delta schema. Keep a migration ledger; re-running successful setup is harmless. Resume failed nontransactional DDL explicitly rather than claiming whole-migration atomicity. Seed stable synthetic IDs without accumulating duplicates. No automatic `DROP`, `CREATE OR REPLACE` on populated tables, or unrelated schema changes.
-6. Run the bounded smoke suite from §6: Lakebase connection/parameterized query, seed read, one create/read and versioned stage update, cleanup of disposable records, then analytics snapshot publication and a Warehouse dashboard read. Verify transactional constraints and the separate credential paths; record any limitation. Cleanup is best-effort within the same total request budget; report leftovers if quota/network access prevents it.
+5. Apply the same versioned Postgres DDL used for local (§5.1) to the dedicated Lakebase schema, and the separate analytics DDL to the dedicated Delta schema. Keep a migration ledger; re-running successful setup is harmless. Resume failed nontransactional DDL explicitly rather than claiming whole-migration atomicity. No automatic `DROP`, `CREATE OR REPLACE` on populated tables, or unrelated schema changes. Then run `scripts/sync-local-to-lakebase.sh` (§5.4) to populate it — not a separate seed script.
+6. Run the bounded smoke suite from §6: Lakebase connection/parameterized query, read a synced row, one create/read and versioned stage update, cleanup of disposable records, then analytics snapshot publication and a Warehouse dashboard read. Verify transactional constraints and the separate credential paths; record any limitation. Cleanup is best-effort within the same total request budget; report leftovers if quota/network access prevents it.
 7. Start the local Docker app with the Databricks override. Exercise one REST and MCP read against the seeded customer. The CRM/MCP server remains on the laptop. Record the complete setup and smoke result, then stop the app; no scheduled traffic.
 
 The deployment pipeline in §11 invokes these scripts. They apply Lakebase setup through PostgreSQL JDBC and analytics setup through Databricks JDBC/Statement API tooling from the local runner; they do not require a Databricks Job or remote access to the laptop's Postgres.
@@ -278,13 +293,15 @@ CI/CD begins with Java verification at Milestone 1 and gains Docker delivery at 
 
 ### 11.1 Zero-cost execution and triggers
 
-Implement portable scripts as the source of pipeline logic, with GitHub Actions wrappers. The guaranteed local route runs these scripts directly with Git and Docker. For a private repository, a runner on the user's existing computer can automate trusted work without renting compute. Public PRs use standard GitHub-hosted Linux runners where permitted; untrusted PRs must never run on the personal self-hosted runner or access deployment credentials.
+Implement portable scripts as the source of pipeline logic, with GitHub Actions wrappers. The guaranteed local route runs these scripts directly with Git and Docker. For a private repository, a runner on the user's existing computer can automate trusted work without renting compute.
+
+**Until a release version, this repository does not accept external pull requests, so the self-hosted-runner-vs-untrusted-PR risk does not yet exist — every workflow that touches the self-hosted runner should trigger only on `push`/`workflow_dispatch` to trusted branches, never on `pull_request`.** Before ever accepting outside PRs, add these concrete GitHub settings as a prerequisite gate, not just a stated intent: enable "Require approval for all outside collaborators" (Settings → Actions → General) so a fork PR's workflow run never executes unapproved; keep every self-hosted-runner workflow restricted to `push`/`workflow_dispatch` only, with PR-triggered CI (once opened) running exclusively on GitHub-hosted runners via plain `pull_request` (never `pull_request_target`, which would check out and run untrusted code with access to secrets); and never grant a PR-triggered workflow access to deployment or Databricks credentials regardless of runner.
 
 GitHub currently documents free self-hosted runner usage and free standard hosted runners for public repositories; private hosted minutes and storage have quotas, and larger runners are charged. Recheck the plan before enabling hosted execution. Keep hosted artifact uploads, remote caches, and registry publishing off by default. Use local images and reports, with bounded local retention. If private hosted CI is selected, require a verified setting that blocks paid overage; otherwise use local scripts/self-hosting. No hosted service is necessary to complete a delivery. [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 
 | Workflow | Trigger and environment | Required stages |
 |---|---|---|
-| `ci.yml` | Push/PR; safe runner selected as above | Java verification, local Postgres integration, MCP tests once implemented, Docker build, Compose smoke, cleanup |
+| `ci.yml` | Push to trusted branches on the self-hosted runner today; add GitHub-hosted `pull_request` only once the repo accepts outside PRs at release, per the settings above | Java verification, local Postgres integration, MCP tests once implemented, Docker build, Compose smoke, cleanup |
 | `deploy-local.yml` | Manual trusted main-branch commit; personal local runner | Verify → build versioned image → deploy → readiness + REST/MCP smoke → record release or roll back |
 | `databricks-free.yml` | Manual trusted main-branch commit only; local authenticated runner | Free target preflight → validate migration/config inputs → apply Lakebase/Delta DDL/seed → publish tiny analytics snapshot → bounded live smoke → report |
 
@@ -334,7 +351,7 @@ Add structured SLF4J logs, Micrometer metrics, and OpenTelemetry spans with loca
 
 Postgres tests prove the Postgres adapter. Mocks prove application behavior against a port. Neither proves Databricks SQL syntax, auth, transaction semantics, or query cancellation. Test skipped/live results must be reported distinctly.
 
-Every load report under `docs/loadtests/` records revision, image/JDK versions, profile, injected delays, dataset, warm-up, concurrency/duration, throughput, p50/p95/p99, error breakdown, connection/query peaks, queue wait, platform/virtual thread counts, heap/GC observations, and container/VM resources. Separate read and write results. Explain the observed bottleneck rather than declaring virtual threads universally faster.
+Every load report under `docs/loadtests/` records revision, image/JDK versions, profile (always `local`, per §6), injected delays, dataset, warm-up, concurrency/duration, throughput, p50/p95/p99, error breakdown, connection/query peaks, queue wait, platform/virtual thread counts, heap/GC observations, and container/VM resources. Separate read and write results. Explain the observed bottleneck rather than declaring virtual threads universally faster.
 
 ## 13. Delivery milestones
 
@@ -369,6 +386,8 @@ Milestones 1–12 are the runnable project checkpoint, including Docker CI/CD an
 - [ ] Remote jobs cannot silently use paid targets; free quota/auth failures stop remote work and leave the local path usable.
 - [ ] HTTP and stdio MCP work locally with synthetic SDK clients; REST/MCP share limits in the single-JVM deployment.
 - [ ] All five concurrency versions and sixteen failure labs remain in the curriculum; preview code is isolated from the normal runtime.
+- [ ] Local Postgres and Lakebase run from one shared DDL/repository implementation (§4, §5.4); Lakebase data comes only from `scripts/sync-local-to-lakebase.sh`, never a second seed script.
+- [ ] Before this repository ever accepts an external pull request: "Require approval for all outside collaborators" is enabled, and no self-hosted-runner workflow triggers on `pull_request`/`pull_request_target` (§11.1). Not yet applicable while the repo takes no outside PRs, but gates release.
 
 ## 15. Review findings resolved in this revision
 
@@ -381,5 +400,8 @@ Milestones 1–12 are the runnable project checkpoint, including Docker CI/CD an
 | Free-tier buckets/prices and future JDK finalization were asserted without sufficient support | Remove speculative claims; cite current primary documentation and recheck at setup |
 | Delta `RELY` was described as if it enforced constraints | Correct constraint semantics; transaction guarantees belong to Postgres/Lakebase |
 | Runtime timing was contradictory; educational evidence was underspecified | Tests/CLIs first, Docker at Milestone 5, explicit traceability and lesson artifacts |
+| v0.3 described a shared Postgres/Lakebase implementation without stating module dependency direction, leaving `crm-databricks` and `crm-persistence` free to silently diverge | `crm-databricks` explicitly depends on `crm-persistence` and reuses its repository classes; only Lakebase auth/`DataSource` and the genuinely different Delta/Warehouse dialect stay separate (§4) |
+| v0.3 implied two independently maintained seed datasets (local and Lakebase) | Added `scripts/sync-local-to-lakebase.sh` (§5.4): local Postgres is the one authoritative dev/test dataset, pushed to Lakebase on demand, one-way, via the shared repository interfaces |
+| v0.3's "untrusted PRs must never run on the self-hosted runner" named no enforcement mechanism | Named the concrete GitHub setting (Require approval for all outside collaborators) and trigger restrictions (§11.1); noted the repo currently takes no external PRs, so this is a gate to satisfy before release, not an active gap |
 
 This review changes the specification only. No cloud resource, credential, runner, or application has been provisioned as part of the review.
