@@ -11,6 +11,10 @@ if command -v java >/dev/null 2>&1 && java -version >/dev/null 2>&1; then
 else
   echo "No local JDK found; building inside maven:3.9-eclipse-temurin-25 instead." >&2
   docker run --rm \
+    --add-host=host.docker.internal:host-gateway \
+    -e CRM_DB_URL="${CRM_DB_URL:-jdbc:postgresql://host.docker.internal:5432/minicrm}" \
+    -e CRM_DB_USERNAME="${CRM_DB_USERNAME:-postgres}" \
+    -e CRM_DB_PASSWORD="${CRM_DB_PASSWORD:-test}" \
     -v "$(pwd)":/work -w /work \
     -v maven-repo-cache:/root/.m2 \
     maven:3.9-eclipse-temurin-25 \

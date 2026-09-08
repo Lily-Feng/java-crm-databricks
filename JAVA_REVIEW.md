@@ -32,18 +32,18 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 | enums | ✅ | [`Stage`](crm-domain/src/main/java/com/minicrm/domain/opportunity/Stage.java) | Enum method (`canTransitionTo`) encodes the allowed stage graph instead of scattering `if` chains across callers. |
 | I/O | ⏳ | — | Focused lab, deferred (design-spec §2). |
 | NIO | ⏳ | — | Focused lab, deferred. |
-| serialization concepts | ⏳ | — | Activity persistence serialization is Milestone 4 (design-spec §5.1). |
+| serialization concepts | ✅ | [`JdbcActivityRepositoryTest`](crm-persistence/src/test/java/com/minicrm/persistence/jdbc/JdbcActivityRepositoryTest.java) | Discriminator/subtype-column mapping round-trips Call, Email, and Meeting (including a SQL array); no Java native serialization. See [session 04](docs/learning/session-04.md). |
 
 ## Modern Java (idea.md §4)
 
 | Topic | Status | Evidence | Lesson |
 |---|---|---|---|
 | lambdas | — | — | Arrives naturally with Streams (Milestone 3). |
-| functional interfaces | — | — | Milestone 3. |
+| functional interfaces | ✅ | `JdbcOpportunityRepository.SqlBinder` and its query lambdas | A checked-SQLException-capable callback binds parameters while shared code owns query resources; exercised by JDBC repository tests. |
 | Stream API | ✅ | [`OpportunityAnalyticsStreams`](crm-application/src/main/java/com/minicrm/application/analytics/OpportunityAnalyticsStreams.java), [`ActivityAnalyticsStreams`](crm-application/src/main/java/com/minicrm/application/analytics/ActivityAnalyticsStreams.java) | `map`/`filter`/`sorted`/`limit`/`groupingBy`/`counting`/`reducing`/`toMap`, each cross-checked byte-for-byte against a loop implementation on the same fixture data ([`OpportunityAnalyticsEquivalenceTest`](crm-application/src/test/java/com/minicrm/application/analytics/OpportunityAnalyticsEquivalenceTest.java)). |
 | Optional | ✅ | [`CustomerRepository.findById`](crm-application/src/main/java/com/minicrm/application/port/CustomerRepository.java), [`CustomerQuery.search`](crm-application/src/main/java/com/minicrm/application/port/CustomerQuery.java) | `Optional<T>` as a port return type (absent vs. present) and as a record field (`Optional<String>` search term) rather than `null`. |
 | var | ✅ | Test bodies throughout `crm-domain/src/test` | Used where the right-hand side already makes the type obvious. |
-| text blocks | — | — | No multi-line string literal needed yet. |
+| text blocks | ✅ | [`JdbcCustomerRepository`](crm-persistence/src/main/java/com/minicrm/persistence/jdbc/JdbcCustomerRepository.java) | Multiline SQL stays readable; values are still bound through PreparedStatement. |
 | pattern matching / switch expressions | ✅ | [`Activity.summary()`](crm-domain/src/main/java/com/minicrm/domain/activity/Activity.java), [`Stage.canTransitionTo`](crm-domain/src/main/java/com/minicrm/domain/opportunity/Stage.java) | Exhaustive `switch` over a sealed interface and over an enum, both without a `default` branch. |
 | modules (JPMS) | — | — | Not adopted; Maven multi-module boundaries plus ArchUnit are the chosen dependency-direction enforcement (design-spec §4). |
 | immutable data | ✅ | All `shared` value types, `Call`/`Email`/`Meeting` | Compact constructors + defensive `List.copyOf` in [`Meeting`](crm-domain/src/main/java/com/minicrm/domain/activity/Meeting.java), verified by `meetingAttendeesAreDefensivelyCopiedAndImmutable`. |
@@ -74,3 +74,9 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 
 See `docs/learning/session-NN.md` for each milestone's runnable command, observed
 result, and remaining limitations.
+
+## JDBC milestone evidence
+
+See [session 04](docs/learning/session-04.md) for the 117-test local verification,
+SQL concurrency/idempotency lessons, and open review findings. Resource failure and
+transaction rollback coverage, plus Lakebase setup/authentication, remain pending.

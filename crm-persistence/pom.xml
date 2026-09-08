@@ -15,8 +15,8 @@
 
   <name>crm-persistence</name>
   <description>
-    In-memory repository adapters (Milestone 3), and later the one JDBC/Postgres
-    repository implementation shared by local Docker Postgres and Lakebase (§4, Milestone 4+).
+    In-memory adapters (Milestone 3), and the one JDBC/Postgres repository
+    implementation shared by local Docker Postgres and Lakebase (§4, Milestone 4+).
   </description>
 
   <dependencies>
@@ -24,6 +24,23 @@
       <groupId>com.minicrm</groupId>
       <artifactId>crm-application</artifactId>
       <version>${project.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.zaxxer</groupId>
+      <artifactId>HikariCP</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
 
     <dependency>
@@ -41,6 +58,12 @@
       <artifactId>archunit-junit5</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>2.0.16</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -51,6 +74,36 @@
         <configuration>
           <useModulePath>false</useModulePath>
         </configuration>
+      </plugin>
+      <plugin>
+        <!--
+          §5.1: "There is ONE versioned Postgres DDL for this schema." The authored copy
+          lives at infra/databricks/sql/postgres (the path §9.2 requires as a deliverable,
+          shared with the Databricks setup scripts); this copies it onto Flyway's default
+          classpath location instead of maintaining a second copy under src/main/resources.
+        -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-shared-postgres-ddl</id>
+            <phase>generate-resources</phase>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/db/migration</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${project.basedir}/../infra/databricks/sql/postgres</directory>
+                  <includes>
+                    <include>*.sql</include>
+                  </includes>
+                </resource>
+              </resources>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

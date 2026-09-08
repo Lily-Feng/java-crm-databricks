@@ -4,6 +4,9 @@ local-tbdelete/*
 target/
 !.mvn/wrapper/maven-wrapper.jar
 
+# Locally downloaded JDK (this host has no system JDK; see scripts/ci.sh)
+.toolchain/
+
 # IDE
 .idea/
 *.iml
@@ -16,3 +19,4 @@ target/
 .env
 *.jfr
 jfr/
+JAVA_REVIEW.md
