@@ -15,6 +15,7 @@
   <modules>
     <module>crm-domain</module>
     <module>crm-application</module>
+    <module>crm-persistence</module>
   </modules>
 
   <properties>

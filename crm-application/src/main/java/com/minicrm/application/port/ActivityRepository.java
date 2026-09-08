@@ -17,7 +17,16 @@ public interface ActivityRepository {
 
     Optional<StoredActivity> findByIdempotencyKey(CustomerId customerId, String idempotencyKey);
 
-    Activity save(Activity activity, String idempotencyKey, String requestHash);
+    /**
+     * Atomically inserts {@code activity} under {@code (customerId, idempotencyKey)} if
+     * and only if no record exists there yet, then returns whichever
+     * {@link StoredActivity} now occupies that key — the caller's own insert, or a
+     * concurrent duplicate call's, whichever the adapter's underlying map serialized
+     * first (§5.2: "Insert and enforce the key in the same transaction"). The caller
+     * decides what the returned hash means by comparing it against its own
+     * {@code requestHash}; this method never throws for a hash mismatch itself.
+     */
+    StoredActivity save(Activity activity, String idempotencyKey, String requestHash);
 
     record StoredActivity(Activity activity, String requestHash) {
     }

@@ -24,8 +24,8 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 | initialization | ✅ | Record compact constructors; [`Opportunity`](crm-domain/src/main/java/com/minicrm/domain/opportunity/Opportunity.java) constructor validation | Invariants enforced before an instance can exist. |
 | exceptions | ✅ | [`InvalidStageTransitionException`](crm-domain/src/main/java/com/minicrm/domain/opportunity/InvalidStageTransitionException.java), [`StaleVersionException`](crm-domain/src/main/java/com/minicrm/domain/opportunity/StaleVersionException.java) | Two distinct unchecked exception types so a stale-version 409 and an invalid-transition 409 stay distinguishable at the REST adapter (Milestone 5). |
 | generics | ✅ | [`CustomerImport.importInto`](crm-application/src/main/java/com/minicrm/application/util/CustomerImport.java), [`CustomerRepository.saveAll`](crm-application/src/main/java/com/minicrm/application/port/CustomerRepository.java) | idea.md §5's PECS example verbatim: `Iterable<? extends Customer>` (producer) into `Collection<? super Customer>` (consumer). Type erasure and bounded wildcards are exercised, not just quoted. |
-| collections | ✅ | [`CustomerOrdering`](crm-application/src/main/java/com/minicrm/application/customer/CustomerOrdering.java) | `Comparator.comparing(...).thenComparing(...)` for deterministic, case-insensitive search ordering. `InMemoryCustomerRepository` (`HashMap`/`ConcurrentHashMap`/`TreeMap`) is Milestone 3. |
-| iterators | ⏳ | — | Milestone 3 (`InMemoryCustomerRepository` iteration). |
+| collections | ✅ | [`CustomerOrdering`](crm-application/src/main/java/com/minicrm/application/customer/CustomerOrdering.java), [`InMemoryCustomerRepository`](crm-persistence/src/main/java/com/minicrm/persistence/inmemory/InMemoryCustomerRepository.java) | `Comparator.comparing(...).thenComparing(...)` for deterministic, case-insensitive search ordering; `ConcurrentHashMap`-backed in-memory adapters ([`InMemoryOpportunityRepository`](crm-persistence/src/main/java/com/minicrm/persistence/inmemory/InMemoryOpportunityRepository.java), [`InMemoryActivityRepository`](crm-persistence/src/main/java/com/minicrm/persistence/inmemory/InMemoryActivityRepository.java)) for the "naive vs atomic map" section below. |
+| iterators | ✅ | Enhanced-`for` loops throughout [`OpportunityAnalyticsLoops`](crm-application/src/main/java/com/minicrm/application/analytics/OpportunityAnalyticsLoops.java) | Reviewed as part of the loops-vs-Streams comparison rather than in isolation. |
 | nested classes | — | — | Not yet needed. |
 | annotations | ⏳ | — | Arrives with Spring (Milestone 5) and JUnit (already implicitly reviewed via `@Test`/`@ParameterizedTest`). |
 | reflection | ⏳ | — | ArchUnit already uses reflection internally ([`DomainHasNoFrameworkDependenciesTest`](crm-domain/src/test/java/com/minicrm/architecture/DomainHasNoFrameworkDependenciesTest.java)); explicit reflection lab is a §4 I/O/NIO-class focused lab, deferred. |
@@ -40,7 +40,7 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 |---|---|---|---|
 | lambdas | — | — | Arrives naturally with Streams (Milestone 3). |
 | functional interfaces | — | — | Milestone 3. |
-| Stream API | ⏳ | — | Milestone 3 (loops-vs-Streams CRM analytics). |
+| Stream API | ✅ | [`OpportunityAnalyticsStreams`](crm-application/src/main/java/com/minicrm/application/analytics/OpportunityAnalyticsStreams.java), [`ActivityAnalyticsStreams`](crm-application/src/main/java/com/minicrm/application/analytics/ActivityAnalyticsStreams.java) | `map`/`filter`/`sorted`/`limit`/`groupingBy`/`counting`/`reducing`/`toMap`, each cross-checked byte-for-byte against a loop implementation on the same fixture data ([`OpportunityAnalyticsEquivalenceTest`](crm-application/src/test/java/com/minicrm/application/analytics/OpportunityAnalyticsEquivalenceTest.java)). |
 | Optional | ✅ | [`CustomerRepository.findById`](crm-application/src/main/java/com/minicrm/application/port/CustomerRepository.java), [`CustomerQuery.search`](crm-application/src/main/java/com/minicrm/application/port/CustomerQuery.java) | `Optional<T>` as a port return type (absent vs. present) and as a record field (`Optional<String>` search term) rather than `null`. |
 | var | ✅ | Test bodies throughout `crm-domain/src/test` | Used where the right-hand side already makes the type obvious. |
 | text blocks | — | — | No multi-line string literal needed yet. |
@@ -58,8 +58,9 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 | virtual threads | ⏳ Milestone 8 |
 | structured concurrency (preview) | ⏳ Milestone 13 |
 | ScopedValue / context propagation | ⏳ Milestone 11 lab |
-| synchronized / volatile / locks / atomics / concurrent collections | ⏳ Milestone 9 (failure labs 01–10) |
-| JMM (happens-before, visibility, CAS) | ⏳ Milestone 9 |
+| synchronized / volatile / locks / atomics | ⏳ Milestone 9 (failure labs 01–10) |
+| concurrent collections (`ConcurrentHashMap`, `CopyOnWriteArrayList`) | ✅ [`NaiveMapConcurrencyLabTest`](crm-persistence/src/test/java/com/minicrm/persistence/lab/NaiveMapConcurrencyLabTest.java), [`InMemoryOpportunityRepository`](crm-persistence/src/main/java/com/minicrm/persistence/inmemory/InMemoryOpportunityRepository.java), [`InMemoryActivityRepository`](crm-persistence/src/main/java/com/minicrm/persistence/inmemory/InMemoryActivityRepository.java) — idea.md §6's naive-`HashMap`-then-`ConcurrentHashMap`-then-atomic-`compute` progression, forced deterministically with a `CyclicBarrier`; the same `compute`/`computeIfAbsent` atomicity is then applied for real to optimistic-concurrency stage updates and activity idempotency. |
+| JMM (happens-before, visibility, CAS) | ⏳ Milestone 9 (full treatment); this milestone's lab only exercises the lost-update symptom, not visibility/ordering directly |
 
 ## JVM (idea.md §16)
 
