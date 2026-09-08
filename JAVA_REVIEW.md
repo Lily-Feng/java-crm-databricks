@@ -10,7 +10,7 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 
 | Topic | Status | Evidence | Lesson |
 |---|---|---|---|
-| primitives / wrappers | ⏳ | — | Milestone 2 (generics/collections review) |
+| primitives / wrappers | ⏳ | — | Deferred; no primitive-heavy code has needed review yet. |
 | String / immutability | ✅ | [`EmailAddress`](crm-domain/src/main/java/com/minicrm/domain/shared/EmailAddress.java), [`Money`](crm-domain/src/main/java/com/minicrm/domain/shared/Money.java) | Value types are records over immutable fields; no setters anywhere in `crm-domain`. |
 | equals/hashCode | ✅ | Records ([`CustomerId`](crm-domain/src/main/java/com/minicrm/domain/shared/CustomerId.java) etc.) | Records generate value-based `equals`/`hashCode`; verified by [`IdentifierTest.newIdGeneratesDistinctValues`](crm-domain/src/test/java/com/minicrm/domain/shared/IdentifierTest.java). |
 | records | ✅ | All value types under [`shared/`](crm-domain/src/main/java/com/minicrm/domain/shared/), [`Call`](crm-domain/src/main/java/com/minicrm/domain/activity/Call.java)/[`Email`](crm-domain/src/main/java/com/minicrm/domain/activity/Email.java)/[`Meeting`](crm-domain/src/main/java/com/minicrm/domain/activity/Meeting.java) | Compact constructors enforce invariants (non-null, `@`, non-negative, [0,1] range) at construction time, not later. |
@@ -23,9 +23,9 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 | static/final | ✅ | `Stage.OPEN_STAGES`, all domain fields `final` except mutable-aggregate state | `Opportunity`/`Customer` intentionally mix `final` identity fields with mutable state fields to model an aggregate with a version. |
 | initialization | ✅ | Record compact constructors; [`Opportunity`](crm-domain/src/main/java/com/minicrm/domain/opportunity/Opportunity.java) constructor validation | Invariants enforced before an instance can exist. |
 | exceptions | ✅ | [`InvalidStageTransitionException`](crm-domain/src/main/java/com/minicrm/domain/opportunity/InvalidStageTransitionException.java), [`StaleVersionException`](crm-domain/src/main/java/com/minicrm/domain/opportunity/StaleVersionException.java) | Two distinct unchecked exception types so a stale-version 409 and an invalid-transition 409 stay distinguishable at the REST adapter (Milestone 5). |
-| generics | ⏳ | — | Milestone 2: repository ports, PECS (`? extends`/`? super`). |
-| collections | ⏳ | — | Milestone 2/3: `InMemoryCustomerRepository` and friends. |
-| iterators | ⏳ | — | Milestone 2/3. |
+| generics | ✅ | [`CustomerImport.importInto`](crm-application/src/main/java/com/minicrm/application/util/CustomerImport.java), [`CustomerRepository.saveAll`](crm-application/src/main/java/com/minicrm/application/port/CustomerRepository.java) | idea.md §5's PECS example verbatim: `Iterable<? extends Customer>` (producer) into `Collection<? super Customer>` (consumer). Type erasure and bounded wildcards are exercised, not just quoted. |
+| collections | ✅ | [`CustomerOrdering`](crm-application/src/main/java/com/minicrm/application/customer/CustomerOrdering.java) | `Comparator.comparing(...).thenComparing(...)` for deterministic, case-insensitive search ordering. `InMemoryCustomerRepository` (`HashMap`/`ConcurrentHashMap`/`TreeMap`) is Milestone 3. |
+| iterators | ⏳ | — | Milestone 3 (`InMemoryCustomerRepository` iteration). |
 | nested classes | — | — | Not yet needed. |
 | annotations | ⏳ | — | Arrives with Spring (Milestone 5) and JUnit (already implicitly reviewed via `@Test`/`@ParameterizedTest`). |
 | reflection | ⏳ | — | ArchUnit already uses reflection internally ([`DomainHasNoFrameworkDependenciesTest`](crm-domain/src/test/java/com/minicrm/architecture/DomainHasNoFrameworkDependenciesTest.java)); explicit reflection lab is a §4 I/O/NIO-class focused lab, deferred. |
@@ -41,7 +41,7 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 | lambdas | — | — | Arrives naturally with Streams (Milestone 3). |
 | functional interfaces | — | — | Milestone 3. |
 | Stream API | ⏳ | — | Milestone 3 (loops-vs-Streams CRM analytics). |
-| Optional | ⏳ | — | Milestone 2 (repository ports: `Optional<Customer> findById`). |
+| Optional | ✅ | [`CustomerRepository.findById`](crm-application/src/main/java/com/minicrm/application/port/CustomerRepository.java), [`CustomerQuery.search`](crm-application/src/main/java/com/minicrm/application/port/CustomerQuery.java) | `Optional<T>` as a port return type (absent vs. present) and as a record field (`Optional<String>` search term) rather than `null`. |
 | var | ✅ | Test bodies throughout `crm-domain/src/test` | Used where the right-hand side already makes the type obvious. |
 | text blocks | — | — | No multi-line string literal needed yet. |
 | pattern matching / switch expressions | ✅ | [`Activity.summary()`](crm-domain/src/main/java/com/minicrm/domain/activity/Activity.java), [`Stage.canTransitionTo`](crm-domain/src/main/java/com/minicrm/domain/opportunity/Stage.java) | Exhaustive `switch` over a sealed interface and over an enum, both without a `default` branch. |
@@ -71,5 +71,5 @@ Legend: ✅ covered · ⏳ planned for a later milestone · — not required by 
 
 ---
 
-See `docs/learning/session-01.md` for this milestone's runnable command, observed result,
-and remaining limitations.
+See `docs/learning/session-NN.md` for each milestone's runnable command, observed
+result, and remaining limitations.
