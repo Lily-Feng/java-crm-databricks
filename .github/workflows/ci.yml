@@ -1,0 +1,28 @@
+name: ci
+
+# §11.1: until this repository accepts external pull requests, every workflow that
+# touches the self-hosted runner triggers only on push/workflow_dispatch to trusted
+# branches, never on pull_request or pull_request_target.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # Requires a self-hosted runner registered on the developer's own machine (§11.1).
+    # Stages beyond Java verification (local Postgres integration, MCP tests, Docker
+    # build, Compose smoke, cleanup) are added as those milestones land (§11.1 table).
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Java verification
+        run: ./scripts/ci.sh

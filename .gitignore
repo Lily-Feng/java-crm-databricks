@@ -1,1 +1,18 @@
 local-tbdelete/*
+
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Runtime / secrets (§12, §8)
+.env
+*.jfr
+jfr/
