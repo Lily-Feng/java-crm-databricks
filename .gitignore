@@ -20,3 +20,6 @@ target/
 *.jfr
 jfr/
 JAVA_REVIEW.md
+
+.databricks
+databricks.yml
