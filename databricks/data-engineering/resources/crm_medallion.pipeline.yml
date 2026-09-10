@@ -1,0 +1,19 @@
+# Lakeflow Declarative Pipeline resource for the CRM bronze/silver/gold layers.
+# See ../README.md for the design and ../src/ for the SQL transformations.
+resources:
+  pipelines:
+    crm_medallion:
+      name: crm_medallion
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      continuous: false
+      libraries:
+        - glob:
+            include: ../src/**
+      configuration:
+        # Referenced from SQL as ${landing_volume} (see src/bronze/*.sql).
+        # scripts/analytics-snapshot.sh (design-spec §9.3) lands one JSON file per
+        # table per run under this Volume path; create the Volume once via
+        # infra/databricks/sql/ before the first pipeline update.
+        landing_volume: /Volumes/${var.catalog}/${var.schema}/crm_landing
